@@ -1,77 +1,87 @@
 package models
 
 import (
-	"container/list"
+	"log"
 	"sync"
+	"time"
 )
+
+type cacheItem struct {
+	value      interface{}
+	expiration int64
+}
 
 type LRUCache struct {
 	capacity int
-	cache    map[string]*list.Element
-	ll       *list.List
-	mu       sync.Mutex
-}
-
-type entry struct {
-	key   string
-	value string
+	items    map[string]*cacheItem
+	order    []string
+	mutex    sync.Mutex
 }
 
 func NewLRUCache(capacity int) *LRUCache {
 	return &LRUCache{
 		capacity: capacity,
-		cache:    make(map[string]*list.Element),
-		ll:       list.New(),
+		items:    make(map[string]*cacheItem),
+		order:    make([]string, 0, capacity),
 	}
 }
 
-func (c *LRUCache) Get(key string) (string, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *LRUCache) Get(key string) (interface{}, bool) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
-	if ele, hit := c.cache[key]; hit {
-		c.ll.MoveToFront(ele)
-		return ele.Value.(*entry).value, true
+	item, exists := c.items[key]
+	if !exists {
+		log.Println("Get:", key, "does not exist")
+		return nil, false
 	}
-	return "", false
+	if time.Now().Unix() > item.expiration {
+		log.Println("Get:", key, "has expired")
+		delete(c.items, key)
+		c.removeFromOrder(key)
+		return nil, false
+	}
+
+	log.Println("Get:", key, "is found with value", item.value)
+	c.updateOrder(key)
+	return item.value, true
 }
 
-func (c *LRUCache) Set(key, value string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if ele, hit := c.cache[key]; hit {
-		c.ll.MoveToFront(ele)
-		ele.Value.(*entry).value = value
-		return
+func (c *LRUCache) Set(key string, value interface{}) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+    
+	if _, exists := c.items[key]; !exists && len(c.items) >= c.capacity {
+		delete(c.items, c.order[0])
+		c.order = c.order[1:]
 	}
 
-	ele := c.ll.PushFront(&entry{key, value})
-	c.cache[key] = ele
-
-	if c.ll.Len() > c.capacity {
-		c.removeOldest()
-	}
+	expiration := time.Now().Add(50 * time.Second).Unix()
+	c.items[key] = &cacheItem{value: value, expiration: expiration}
+	c.updateOrder(key)
+	log.Printf("%s added successfully", key)
 }
 
 func (c *LRUCache) Delete(key string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
-	if ele, hit := c.cache[key]; hit {
-		c.removeElement(ele)
+	if _, exists := c.items[key]; exists {
+		delete(c.items, key)
+		c.removeFromOrder(key)
 	}
 }
 
-func (c *LRUCache) removeOldest() {
-	ele := c.ll.Back()
-	if ele != nil {
-		c.removeElement(ele)
-	}
+func (c *LRUCache) updateOrder(key string) {
+	c.removeFromOrder(key)
+	c.order = append(c.order, key)
 }
 
-func (c *LRUCache) removeElement(e *list.Element) {
-	c.ll.Remove(e)
-	kv := e.Value.(*entry)
-	delete(c.cache, kv.key)
+func (c *LRUCache) removeFromOrder(key string) {
+	for i, v := range c.order {
+		if v == key {
+			c.order = append(c.order[:i], c.order[i+1:]...)
+			break
+		}
+	}
 }

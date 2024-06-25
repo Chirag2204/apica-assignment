@@ -9,32 +9,36 @@ import (
 
 var cache = models.NewLRUCache(5)
 
+type CacheRequest struct {
+	Key   string      `json:"key"`
+	Value interface{} `json:"value"`
+}
+
 func GetCache(c *gin.Context) {
 	key := c.Param("key")
-	if value, ok := cache.Get(key); ok {
-		c.JSON(http.StatusOK, gin.H{"value": value})
-	} else {
+	value, exists := cache.Get(key)
+	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Key not found"})
+		return
 	}
+	c.JSON(http.StatusOK, gin.H{"key": key, "value": value})
 }
 
 func SetCache(c *gin.Context) {
 	key := c.Param("key")
-	var json struct {
-		Value string `json:"value"`
-	}
+	var request CacheRequest
 
-	if err := c.BindJSON(&json); err != nil {
+	if err := c.BindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
 
-	cache.Set(key, json.Value)
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	cache.Set(key, request.Value)
+	c.JSON(http.StatusOK, gin.H{"message": "Key set successfully"})
 }
 
 func DeleteCache(c *gin.Context) {
 	key := c.Param("key")
 	cache.Delete(key)
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, gin.H{"message": "Key deleted successfully"})
 }
